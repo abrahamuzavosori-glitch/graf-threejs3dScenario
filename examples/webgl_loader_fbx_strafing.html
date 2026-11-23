@@ -1,0 +1,521 @@
+
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <title>three.js webgl - FBX loader - Strafing 3D Scenario</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link type="text/css" rel="stylesheet" href="main.css">
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            z-index: 10;
+            font-family: Arial, sans-serif;
+            pointer-events: none;
+        }
+
+        #info a {
+            color: #00bfff;
+            pointer-events: auto;
+        }
+
+        #audioMessage {
+            color: #00ffcc;
+            margin-top: 8px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="info">
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a>
+        - FBXLoader (Strafing)<br>
+
+        Character and animation from
+        <a href="https://www.mixamo.com/" target="_blank" rel="noopener">Mixamo</a>
+
+        <div id="audioMessage">
+            Haz clic en la pantalla para activar el audio
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../build/three.module.js",
+                "three/addons/": "./jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+
+        import * as THREE from 'three';
+
+        import Stats from 'three/addons/libs/stats.module.js';
+
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+        import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+
+
+        let camera, scene, renderer, stats;
+
+        let mixer;
+
+        let sound;
+
+        let audioLoaded = false;
+
+        let audioStarted = false;
+
+        const clock = new THREE.Clock();
+
+
+        init();
+
+        animate();
+
+
+        function init() {
+
+            const container = document.createElement('div');
+
+            document.body.appendChild(container);
+
+
+            // =========================================================
+            // 1. CÁMARA
+            // =========================================================
+
+            camera = new THREE.PerspectiveCamera(
+                45,
+                window.innerWidth / window.innerHeight,
+                1,
+                2000
+            );
+
+            camera.position.set(100, 200, 300);
+
+
+            // =========================================================
+            // 2. ESCENA
+            // =========================================================
+
+            scene = new THREE.Scene();
+
+
+            // =========================================================
+            // 3. AMBIENTE 360° (EXR)
+            // =========================================================
+
+            const exrLoader = new EXRLoader();
+
+            exrLoader.load(
+                'models/rgbe/ambiente.exr',
+
+                function(texture) {
+
+                    texture.mapping = THREE.EquirectangularReflectionMapping;
+
+                    scene.background = texture;
+
+                    scene.environment = texture;
+
+                },
+
+                undefined,
+
+                function(error) {
+
+                    console.error('Error cargando ambiente EXR:', error);
+
+                }
+            );
+
+
+            // =========================================================
+            // 4. ILUMINACIÓN
+            // =========================================================
+
+            const hemiLight = new THREE.HemisphereLight(
+                0xffffff,
+                0x444444,
+                3
+            );
+
+            hemiLight.position.set(0, 200, 0);
+
+            scene.add(hemiLight);
+
+
+            const dirLight = new THREE.DirectionalLight(
+                0xffffff,
+                4
+            );
+
+            dirLight.position.set(0, 200, 100);
+
+            dirLight.castShadow = true;
+
+            dirLight.shadow.camera.top = 180;
+
+            dirLight.shadow.camera.bottom = -100;
+
+            dirLight.shadow.camera.left = -120;
+
+            dirLight.shadow.camera.right = 120;
+
+            scene.add(dirLight);
+
+
+            const topLight = new THREE.SpotLight(
+                0xffffff,
+                4
+            );
+
+            topLight.position.set(0, 350, 0);
+
+            topLight.angle = Math.PI / 4;
+
+            topLight.penumbra = 0.5;
+
+            topLight.castShadow = true;
+
+            scene.add(topLight);
+
+
+            // =========================================================
+            // 5. PISO CON TEXTURA DE GRAVA
+            // =========================================================
+
+            const floorTexture = new THREE.TextureLoader().load(
+                'models/rgbe/suelo_grava.jpg',
+                undefined,
+                undefined,
+                function(error) {
+                    console.error('Error cargando textura:', error);
+                }
+            );
+
+            floorTexture.wrapS = THREE.RepeatWrapping;
+
+            floorTexture.wrapT = THREE.RepeatWrapping;
+
+            floorTexture.repeat.set(12, 12);
+
+
+            const mesh = new THREE.Mesh(
+
+                new THREE.PlaneGeometry(2000, 2000),
+
+                new THREE.MeshPhongMaterial({
+                    map: floorTexture,
+                    depthWrite: false
+                })
+
+            );
+
+            mesh.rotation.x = -Math.PI / 2;
+
+            mesh.receiveShadow = true;
+
+            scene.add(mesh);
+
+
+            const grid = new THREE.GridHelper(
+                2000,
+                20,
+                0x000000,
+                0x000000
+            );
+
+            grid.material.opacity = 0.15;
+
+            grid.material.transparent = true;
+
+            scene.add(grid);
+
+
+            // =========================================================
+            // 6. MODELO FBX Y ANIMACIÓN
+            // =========================================================
+
+            const loader = new FBXLoader();
+
+            loader.load(
+
+                'models/fbx/strafing.fbx',
+
+                function(object) {
+
+                    mixer = new THREE.AnimationMixer(object);
+
+                    if (object.animations.length > 0) {
+
+                        const action = mixer.clipAction(
+                            object.animations[0]
+                        );
+
+                        action.play();
+
+                    }
+
+                    const customMaterial = new THREE.MeshPhongMaterial({
+
+                        color: 0x1e90ff,
+
+                        specular: 0xffffff,
+
+                        shininess: 90
+
+                    });
+
+
+                    object.traverse(function(child) {
+
+                        if (child.isMesh) {
+
+                            child.material = customMaterial;
+
+                            child.castShadow = true;
+
+                            child.receiveShadow = true;
+
+                        }
+
+                    });
+
+
+                    scene.add(object);
+
+                },
+
+                undefined,
+
+                function(error) {
+
+                    console.error('Error cargando modelo FBX:', error);
+
+                }
+
+            );
+
+
+            // =========================================================
+            // 7. SISTEMA DE AUDIO
+            // =========================================================
+
+            const listener = new THREE.AudioListener();
+
+            camera.add(listener);
+
+
+            sound = new THREE.Audio(listener);
+
+
+            const audioLoader = new THREE.AudioLoader();
+
+
+            audioLoader.load(
+
+                'models/rgbe/audio_grava.mp3',
+
+                function(buffer) {
+
+                    sound.setBuffer(buffer);
+
+                    sound.setLoop(true);
+
+                    sound.setVolume(0.5);
+
+                    audioLoaded = true;
+
+                    console.log('Audio cargado correctamente');
+
+                    document.getElementById('audioMessage').textContent =
+                        'Audio listo. Haz clic para reproducir';
+
+                },
+
+                function(xhr) {
+
+                    console.log(
+                        'Cargando audio: ' +
+                        (xhr.loaded / xhr.total * 100).toFixed(0) +
+                        '%'
+                    );
+
+                },
+
+                function(error) {
+
+                    console.error('Error cargando MP3:', error);
+
+                    document.getElementById('audioMessage').textContent =
+                        'Error al cargar el audio. Revisa la ruta del MP3';
+
+                }
+
+            );
+
+
+            // =========================================================
+            // 8. ACTIVAR AUDIO CON INTERACCIÓN
+            // =========================================================
+
+            async function activarAudio() {
+
+                const audioContext = listener.context;
+
+                try {
+
+                    if (audioContext.state !== 'running') {
+
+                        await audioContext.resume();
+
+                    }
+
+                    if (audioLoaded && !audioStarted) {
+
+                        sound.play();
+
+                        audioStarted = true;
+
+                        document.getElementById('audioMessage').textContent =
+                            'Audio activado correctamente';
+
+                        console.log('Audio reproduciéndose');
+
+                    }
+
+                } catch(error) {
+
+                    console.error('Error al activar audio:', error);
+
+                    document.getElementById('audioMessage').textContent =
+                        'No se pudo activar el audio';
+
+                }
+
+            }
+
+
+            window.addEventListener('click', activarAudio);
+
+            window.addEventListener('keydown', activarAudio);
+
+
+            // =========================================================
+            // 9. RENDERER
+            // =========================================================
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: true
+            });
+
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            renderer.setSize(
+                window.innerWidth,
+                window.innerHeight
+            );
+
+            renderer.shadowMap.enabled = true;
+
+            container.appendChild(renderer.domElement);
+
+
+            // =========================================================
+            // 10. CONTROLES DE CÁMARA
+            // =========================================================
+
+            const controls = new OrbitControls(
+                camera,
+                renderer.domElement
+            );
+
+            controls.target.set(0, 100, 0);
+
+            controls.update();
+
+
+            // =========================================================
+            // 11. ESTADÍSTICAS
+            // =========================================================
+
+            stats = new Stats();
+
+            container.appendChild(stats.dom);
+
+
+            window.addEventListener(
+                'resize',
+                onWindowResize
+            );
+
+        }
+
+
+        // =============================================================
+        // 12. REDIMENSIONAR VENTANA
+        // =============================================================
+
+        function onWindowResize() {
+
+            camera.aspect =
+                window.innerWidth / window.innerHeight;
+
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(
+                window.innerWidth,
+                window.innerHeight
+            );
+
+        }
+
+
+        // =============================================================
+        // 13. ANIMACIÓN Y RENDERIZADO
+        // =============================================================
+
+        function animate() {
+
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            if (mixer) {
+
+                mixer.update(delta);
+
+            }
+
+            renderer.render(scene, camera);
+
+            stats.update();
+
+        }
+
+    </script>
+
+</body>
+
+</html>
